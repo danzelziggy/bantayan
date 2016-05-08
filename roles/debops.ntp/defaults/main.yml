@@ -1,0 +1,147 @@
+---
+
+# Which clock management daemon should be installed?
+# Supported:
+# * ntpdate
+# * ntpd
+# * openntpd
+# Set to False to disable clock management
+ntp_daemon: 'openntpd'
+
+# Timezone configuration
+# Specify timezone as 'Area/Zone', use 'timedatectl list-timezones' to see list of
+# possible values. To set the UTC timezone, specify it as 'Etc/UTC'
+# If this variable is empty or False, the timezone won't be changed
+ntp_timezone: 'Asia/Manila'
+
+# List of interfaces ntpd should listen on. Specify '*' to listen on all
+# interfaces.
+ntp_listen: []
+
+# Enable or disable access to ntpd service through firewall
+ntp_firewall_access: False
+
+# List of hosts/networks in CIDR format to allow access to ntp port in
+# firewall. If this list is False, access will be allowed from anywhere. You
+# should probably define a list of networks allowed access to mitigate NTP
+# amplification attacks
+ntp_allow: []
+
+# List of NTP servers to synchronize with
+# If you use NTPd, you can add server options in server strings, for example:
+#   '0.debian.pool.ntp.org iburst minpoll 6 maxpoll 10'
+# If you're syncing against local servers, recommended options are --
+# 'burst iburst minpoll 4 maxpoll 4', where:
+#  - 'burst' and 'iburst' -- Get a time sync as fast as possible by sending 8 sync
+#                            queries with 2 second interval. (Beware though,
+#                            this is considered as an abuse on public servers!)
+#  - minpoll, maxpoll -- Min/max interval for sync queries to be sent in normal
+#                        operation mode. It's defined in seconds as a
+#                        power of two:
+#                         4 -- 16 seconds (minimal allowed)
+#                         5 -- 32 seconds
+#                         6 -- 64 seconds
+#                        and so on.
+ntp_servers:
+  - '0.debian.pool.ntp.org'
+  - '1.debian.pool.ntp.org'
+  - '2.debian.pool.ntp.org'
+  - '3.debian.pool.ntp.org'
+
+# NTPd specific.
+# Fudge local clock if time servers is not available
+ntp_fudge: True
+
+# List of global root flags to check
+ntp_root_flags:
+
+  # If these flags are present, ignore status of "cap_sys_time" capability and
+  # install specified ntp daemon
+  cap_sys_time: [ 'ignore-cap12s', 'ignore-cap_sys_time' ]
+
+# Name of the ``iptables`` chain to use for filtering NTP connections.
+ntp_ferm_chain: 'filter-ntp'
+
+# Weight of the ``debops.ntp`` firewall rules, determines the order of the
+# configuration files.
+ntp_ferm_weight: '40'
+
+# Time window which firewall checks to filter too many connections, specified
+# in seconds.
+ntp_ferm_recent_seconds: '{{ (60 * 60) }}'
+
+# Maximum number of new connections from a host in the specified time window.
+ntp_ferm_recent_hitcount: 5
+
+# Specify what should firewall do with packets that exceed allowed limits. You
+# can use ``DROP`` (recommended), ``REJECT`` (high risk of reflection attacks) or
+# specify name of an ``iptables`` chain to sent the packets into.
+ntp_ferm_recent_target: 'DROP'
+
+# Configuration of iptables firewall using ``ferm``.
+ntp_ferm_dependent_rules:
+
+  - type: 'accept'
+    dport: [ 'ntp' ]
+    protocol: 'udp'
+    weight: '{{ ntp_ferm_weight }}'
+    role: 'ntp'
+    role_weight: '10'
+    name: 'jump-filter-ntp'
+    target: '{{ ntp_ferm_chain }}'
+    when: '{{ ntp_daemon in [ "openntpd", "ntpd" ] and
+              ntp_firewall_access | bool }}'
+    delete: '{{ ntp_daemon not in [ "openntpd", "ntp" ] or
+                not ntp_firewall_access | bool }}'
+
+  - chain: '{{ ntp_ferm_chain }}'
+    type: 'recent'
+    dport: [ 'ntp' ]
+    protocol: 'udp'
+    saddr: '{{ ntp_allow }}'
+    weight: '{{ ntp_ferm_weight }}'
+    role: 'ntp'
+    role_weight: '20'
+    name: 'mark'
+    subchain: False
+    recent_set_name: 'ntp-new'
+    recent_log: False
+    when: '{{ ntp_daemon in [ "openntpd", "ntpd" ] and
+              ntp_firewall_access | bool }}'
+    delete: '{{ ntp_daemon not in [ "openntpd", "ntp" ] or
+                not ntp_firewall_access | bool }}'
+
+  - chain: '{{ ntp_ferm_chain }}'
+    type: 'recent'
+    dport: [ 'ntp' ]
+    protocol: [ 'udp' ]
+    weight: '{{ ntp_ferm_weight }}'
+    role: 'ntp'
+    role_weight: '30'
+    name: 'filter'
+    subchain: False
+    recent_name: 'ntp-new'
+    recent_update: True
+    recent_seconds: '{{ ntp_ferm_recent_seconds }}'
+    recent_hitcount: '{{ ntp_ferm_recent_hitcount }}'
+    recent_target: '{{ ntp_ferm_recent_target }}'
+    recent_log_prefix: 'ipt-recent-ntp: '
+    when: '{{ ntp_daemon in [ "openntpd", "ntpd" ] and
+              ntp_firewall_access | bool }}'
+    delete: '{{ ntp_daemon not in [ "openntpd", "ntp" ] or
+                not ntp_firewall_access | bool }}'
+
+  - chain: '{{ ntp_ferm_chain }}'
+    type: 'accept'
+    dport: [ 'ntp' ]
+    protocol: 'udp'
+    state: 'NEW'
+    saddr: '{{ ntp_allow }}'
+    weight: '{{ ntp_ferm_weight }}'
+    role: 'ntp'
+    role_weight: '40'
+    when: '{{ ntp_daemon in [ "openntpd", "ntpd" ] and
+              ntp_firewall_access | bool }}'
+    delete: '{{ ntp_daemon not in [ "openntpd", "ntp" ] or
+                not ntp_firewall_access | bool }}'
+
